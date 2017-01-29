@@ -1,5 +1,4 @@
 """Replay requests from an HTTP access log file.
-
 - Takes time between requests into account, with option to speed up the replay.
 - Allows one to send all requests to a selected server (proxy).
 """
@@ -15,10 +14,11 @@ from optparse import OptionParser
 HOST_INDEX = 0
 TIME_INDEX = 3
 PATH_INDEX = 6
+HTTP_METHOD = 5
 
-def main(filename, proxy, speedup=1):
+def main(filename, proxy, hostname, speedup=1):
     """Setup and start replaying."""    
-    requests = _parse_logfile(filename)
+    requests = _parse_logfile(filename, hostname)
     _setup_http_client(proxy)
     _replay(requests, speedup)
 
@@ -37,9 +37,12 @@ def _replay(requests, speedup):
         url = "http://" + host + path
         try:
             req_result = "OK"
-            urllib2.urlopen(url)
+            req = urllib2.Request(url)
+            req.add_header('Authorization', 'Basic YWRtaW46YWRtaW4=')
+            urllib2.urlopen(req)
         except Exception:
             req_result = "FAILED"
+            print Exception
         print ("[%s] REQUEST: %s -- %s"
             % (request_time.strftime("%H:%M:%S"), url, req_result))
 
@@ -50,7 +53,7 @@ def _setup_http_client(proxy):
     opener = urllib2.build_opener(proxy_handler)
     urllib2.install_opener(opener)
 
-def _parse_logfile(filename):
+def _parse_logfile(filename, hostname):
     """Parse the logfile and return a list with tuples of the form
     (<request time>, <requested host>, <requested url>)
     """
@@ -58,11 +61,13 @@ def _parse_logfile(filename):
     requests = []
     for line in logfile:
         parts = line.split(" ")
+        http_method = parts[HTTP_METHOD][1:]
         time_text = parts[TIME_INDEX][1:]
         request_time = datetime.strptime(time_text, "%d/%b/%Y:%H:%M:%S")
-        host = parts[HOST_INDEX]
+        host =  parts[HOST_INDEX]
         path = parts[PATH_INDEX]
-        requests.append((request_time, host, path))
+        if http_method == 'GET' and host != '::1':
+            requests.append((request_time, hostname if hostname != None else host, path))
     if not requests:
         print "Seems like I don't know how to parse this file!"
     return requests
@@ -80,9 +85,12 @@ if __name__ == "__main__":
         dest='speedup',
         type='int',
         default=1)
+    parser.add_option('-n', '--hostname',
+        help='Hostname to override the one from apache log',
+        dest='hostname',
+        default=None)
     (options, args) = parser.parse_args()
     if len(args) == 1:
-        main(args[0], options.proxy, options.speedup)
+        main(args[0], options.proxy, options.hostname, options.speedup)
     else:
         parser.error("incorrect number of arguments")
-        
